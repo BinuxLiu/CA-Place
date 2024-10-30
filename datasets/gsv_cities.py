@@ -17,6 +17,8 @@ TRAIN_CITIES = ['Bangkok', 'BuenosAires', 'LosAngeles', 'MexicoCity', 'OSL',
                 'PRG', 'WashingtonDC', 'Brussels', 'London',
                 'Melbourne', 'Osaka', 'PRS',]
 
+# TRAIN_CITIES = ['Bangkok', 'BuenosAires'] # just for testing
+
 class GSVCitiesDataset(Dataset):
     def __init__(self, args, cities=['London', 'Boston'], img_per_place=4, min_img_per_place=4):
         super(GSVCitiesDataset, self).__init__()

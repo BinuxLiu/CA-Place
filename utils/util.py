@@ -8,7 +8,7 @@ import numpy as np
 from sklearn.decomposition import PCA
 import joblib
 
-from datasets import pca_dataset
+# from datasets import pca_dataset
 
 
 def save_checkpoint(args, state, is_best, filename):
@@ -80,33 +80,6 @@ def split_and_assign_qkv_parameters(model, pretrained_dict):
                             sublayer.q.bias.data = q_bias
                             sublayer.k.bias.data = k_bias
                             sublayer.v.bias.data = v_bias
-
-def compute_pca(args, model, pca_dataset_folder, full_features_dim, pca_file_path = "./logs/pca.pkl"):
-    
-    try:
-        pca = joblib.load(pca_file_path)
-        print("Loaded PCA from file.")
-        return pca
-    except FileNotFoundError:
-        print("PCA file not found, computing PCA.")
-        
-    model = model.eval()
-    pca_ds = pca_dataset.PCADataset(args, args.datasets_folder, pca_dataset_folder)
-    dl = torch.utils.data.DataLoader(pca_ds, args.infer_batch_size, shuffle=True)
-    pca_features = np.empty([min(len(pca_ds), 2**14), full_features_dim])
-    with torch.no_grad():
-        for i, images in enumerate(dl):
-            if i*args.infer_batch_size >= len(pca_features):
-                break
-            features = model(images.to("cuda")).cpu().numpy()
-            pca_features[i*args.infer_batch_size : (i*args.infer_batch_size)+len(features)] = features
-    pca = PCA(args.pca_dim)
-    pca.fit(pca_features)
-    
-    joblib.dump(pca, pca_file_path)
-    print("PCA computed and saved to file.")
-    
-    return pca
 
 def print_trainable_parameters(model):
     """

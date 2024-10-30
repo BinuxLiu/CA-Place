@@ -7,45 +7,50 @@ from models import mamba_vision
 import torchvision.transforms as transforms
 import time
 
-
 class MambaVGL(nn.Module):
     def __init__(self, args):
         super().__init__()
-        self.backbone = mamba_vision.mamba_vision_T(pretrained=True, model_path = "/root/autodl-tmp/MambaVision/weights/mambavision_tiny_1k.pth.tar")
+        self.backbone = mamba_vision.mamba_vision_T(
+            pretrained=True, 
+            model_path = "/root/autodl-tmp/MambaVision/weights/mambavision_tiny_1k.pth.tar")
         
-        self.aggregation = get_aggregation(args)
+        self.aggregation = get_aggregation(args, channels=640)
         
     def forward(self, x):
         x = self.backbone.patch_embed(x)
         for lev in self.backbone.levels:
             x = lev(x)
+        feats_s = x
         x = self.backbone.norm(x)
         x = self.aggregation(x)
-        return x
+        return x, feats_s
     
 class VGLNet(nn.Module):
 
     def __init__(self, args):
         super().__init__()
-        self.backbone = dinov2_network.DINOv2(backbone=args.backbone,
-                               trainable_layers=args.trainable_layers)
+        self.backbone = dinov2_network.DINOv2(
+            backbone=args.backbone_t,
+            trainable_layers=args.trainable_layers,
+            return_token=args.use_cls)
         
-        self.aggregation = get_aggregation(args)
+        self.aggregation = get_aggregation(args, channels = dinov2_network.CHANNELS_NUM[args.backbone_t])
         
     def forward(self, x):
 
         x = self.backbone(x)
+        feats_t = x
         x = self.aggregation(x)
-        return x, x
+        return x, feats_t
     
 class VGLNet_Test(nn.Module):
 
     def __init__(self, args):
         super().__init__()
-        self.backbone = dinov2_network.DINOv2(backbone=args.backbone,
+        self.backbone = dinov2_network.DINOv2(backbone=args.backbone_t,
                                trainable_layers=args.trainable_layers)
         
-        self.aggregation = get_aggregation(args)
+        self.aggregation = get_aggregation(args, channels = dinov2_network.CHANNELS_NUM[args.backbone_t])
         
         self.all_time = 0
         
@@ -58,30 +63,23 @@ class VGLNet_Test(nn.Module):
             x = transforms.functional.resize(x, [h, w], antialias=True)
 
         x = self.backbone(x)
-        
-        # start_time = time.time()
-        
+        feats_t = x
         x = self.aggregation(x)
-        
-        # end_time = time.time()
-        # self.all_time = self.all_time + (end_time - start_time)
 
-        return x
+        return x, feats_t
     
 
-def get_aggregation(args):
+def get_aggregation(args, channels = None):
     if args.aggregation == "salad":
-        return aggregations.SALAD(num_channels = dinov2_network.CHANNELS_NUM[args.backbone])
-    elif args.aggregation == "netvlad":
-        return aggregations.NetVLAD(clusters_num=args.clusters, dim=dinov2_network.CHANNELS_NUM[args.backbone], work_with_tokens=args.use_cls, linear_dim = args.linear_dim, work_with_linear = args.use_linear)
+        return aggregations.SALAD(num_channels = channels)
     elif args.aggregation == "cosgem":
-        return aggregations.CosGeM(features_dim=dinov2_network.CHANNELS_NUM[args.backbone], fc_output_dim=args.features_dim)
+        return aggregations.CosGeM(features_dim= channels, fc_output_dim=args.features_dim)
     elif args.aggregation == "cls":
         return aggregations.CLS()
     elif args.aggregation == "g2m":
         return aggregations.G2M(
-            num_channels=640,
-            # num_channels=dinov2_network.CHANNELS_NUM[args.backbone],
+            # num_channels=640,
+            num_channels=channels,
             fc_output_dim=args.features_dim,
             num_hiddens=args.num_hiddens,
             use_cls=args.use_cls,
