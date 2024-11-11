@@ -9,7 +9,7 @@ def parse_arguments():
                         help="traing or testing")
     parser.add_argument("--num_hiddens", type=int, default=3,
                         help="channel attention")
-    parser.add_argument("--lambda_kd", type=int, default=1,
+    parser.add_argument("--lambda_kd", type=float, default=1,
                         help="")
     parser.add_argument("--ca_method", type=str, default="gem",
                         choices=["gem", "avg", "cba"], help="_")
@@ -28,7 +28,7 @@ def parse_arguments():
                         help="Batch size for training.")
     parser.add_argument("--infer_batch_size", type=int, default=64,
                         help="Batch size for inference.")
-    parser.add_argument("--epochs_num", type=int, default=4,
+    parser.add_argument("--epochs_num", type=int, default=10,
                         help="number of epochs to train")
     parser.add_argument("--patience", type=int, default=3)
     parser.add_argument("--lr", type=float, default=0.00006, help="_")

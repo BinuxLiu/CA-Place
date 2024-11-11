@@ -13,7 +13,9 @@ from utils import util, parser, commons, test
 from models import vgl_network
 from datasets import gsv_cities, base_dataset
 
-from losses.relational_kd import RKD
+from losses.lotd import LoTD
+
+from itertools import chain
 
 torch.backends.cudnn.benchmark = True  # Provides a speedup
 #### Initial setup: parser, logging...
@@ -41,6 +43,41 @@ model_t = model_t.to("cuda")
 util.resume_model(args, model_t)
 model_t = torch.nn.DataParallel(model_t)
 
+train_ds = gsv_cities.GSVCitiesDataset(args, cities=(gsv_cities.TRAIN_CITIES))
+train_dl = DataLoader(train_ds, batch_size= args.train_batch_size, num_workers=args.num_workers, pin_memory= True)
+
+# lambdas_kd = [100, 1, 0.01, 1]
+# teacher_embeddings = []
+teacher_feats_1 = []
+teacher_feats_2 = []
+teacher_feats_3 = []
+teacher_feats_4 = []
+
+model_t.eval()
+with torch.no_grad():
+    for places, labels in tqdm(train_dl, ncols=100, desc="Computing teacher embeddings"):
+        BS, N, ch, h, w = places.shape
+        images = places.view(BS*N, ch, h, w)
+
+        embeddings_t, feats_t = model_t(images)
+
+        teacher_feats_1.append(feats_t[0].cpu())
+        teacher_feats_2.append(feats_t[1].cpu())
+        teacher_feats_3.append(feats_t[2].cpu())
+        teacher_feats_4.append(feats_t[3].cpu())
+        # teacher_embeddings.append(embeddings_t)
+
+teacher_feats_1 = torch.cat(teacher_feats_1)
+teacher_feats_2 = torch.cat(teacher_feats_2)
+teacher_feats_3 = torch.cat(teacher_feats_3)
+teacher_feats_4 = torch.cat(teacher_feats_4)
+# teacher_embeddings = torch.cat(teacher_embeddings)
+
+# release GPU Cache
+model_t.cpu()
+del model_t
+torch.cuda.empty_cache()
+
 #### Initialize student model
 model_s = vgl_network.MambaVGL(args)
 model_s = model_s.to("cuda")
@@ -51,29 +88,40 @@ util.print_trainable_parameters(model_s)
 writer = SummaryWriter('../../tf-logs')
 
 #### Setup Optimizer and Loss
-optimizer = torch.optim.AdamW(model_s.parameters(), lr=args.lr)
-scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1, end_factor=0.2, total_iters=4000)
 criterion = losses.MultiSimilarityLoss(alpha=1.0, beta=50, base=0.0, distance=distances.CosineSimilarity())
-criterion_kd = RKD(args.w_dist, args.w_angle)
+criterion_kd1 = LoTD(channel_s = 160)
+criterion_kd2 = LoTD(channel_s = 320)
+criterion_kd3 = LoTD(channel_s = 640)
+criterion_kd4 = LoTD(channel_s = 640)
+# criterion_kd = LoRD(num_channels = 640, embedding = True)
+optimizer = torch.optim.AdamW(
+    chain(model_s.parameters(),
+    criterion_kd1.parameters(),
+    criterion_kd2.parameters(),
+    criterion_kd3.parameters(),
+    criterion_kd4.parameters(),
+    # criterion_kd.parameters(),
+    ), lr=args.lr)
+
+# optimizer = torch.optim.AdamW(model_s.parameters(), lr=args.lr)
+
+scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1, end_factor=0.2, total_iters=4000)
+
 miner = miners.MultiSimilarityMiner(epsilon=0.1, distance=distances.CosineSimilarity())
 if args.use_amp16:
     scaler = torch.cuda.amp.GradScaler()
 
 best_r1 = start_epoch_num = not_improved_num = 0
 
+
 #### Training loop
 for epoch_num in range(start_epoch_num, args.epochs_num):
     logging.info(f"Start training epoch: {epoch_num:02d}")
 
-    random_datasets = gsv_cities.TRAIN_CITIES.copy()
-    random.shuffle(random_datasets)
-    train_ds = gsv_cities.GSVCitiesDataset(args, cities=(random_datasets))
-    train_dl = DataLoader(train_ds, batch_size= args.train_batch_size, num_workers=args.num_workers, pin_memory= True)
     epoch_start_time = datetime.now()
     epoch_losses=[]
-
-    model_t.eval()
     model_s.train()
+    
     for batch_idx, (places, labels) in enumerate(tqdm(train_dl, ncols=100, desc=f"Epoch {epoch_num+1}/{args.epochs_num}")):
 
         BS, N, ch, h, w = places.shape
@@ -84,12 +132,20 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
 
         with torch.cuda.amp.autocast():
             embeddings_s, feats_s = model_s(images)
-            embeddings_t, feats_t = model_t(images)
+            
+            batch_teacher_feats_1 = teacher_feats_1[batch_idx * BS * N : (batch_idx + 1) * BS * N].cuda()
+            batch_teacher_feats_2 = teacher_feats_2[batch_idx * BS * N : (batch_idx + 1) * BS * N].cuda()
+            batch_teacher_feats_3 = teacher_feats_3[batch_idx * BS * N : (batch_idx + 1) * BS * N].cuda()
+            batch_teacher_feats_4 = teacher_feats_4[batch_idx * BS * N : (batch_idx + 1) * BS * N].cuda()
+            # batch_teacher_embeddings = teacher_embeddings[batch_idx * BS * N : (batch_idx + 1) * BS * N]
+            
             miner_outputs = miner(embeddings_s, labels)
             loss_ms = criterion(embeddings_s, labels, miner_outputs)
-            loss_kd = criterion_kd(embeddings_s, embeddings_t.detach()) * args.lambda_kd
-            loss = loss_ms + loss_kd
-            # logging.info(f"MS_loss: {loss_ms:.2f}, KD_loss: {loss_kd:.2f}")
+            loss_kd = criterion_kd1(feats_s[0], batch_teacher_feats_1) + criterion_kd2(feats_s[1], batch_teacher_feats_1) + criterion_kd3(feats_s[2], batch_teacher_feats_1) + criterion_kd4(feats_s[3], batch_teacher_feats_1)
+            # loss_kd_l2 = criterion_kd(embeddings_s, batch_teacher_embeddings)
+            loss = loss_ms + loss_kd # + loss_kd_l2
+            # logging.info(f"MS_loss: {loss_ms:.2f}, KD_loss: {loss_kd:.8f}, KD_loss_l2: {loss_kd_l2:.8f}\n")
+            
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
@@ -100,7 +156,8 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         writer.add_scalar('training loss', batch_loss, epoch_num * len(train_dl) + batch_idx)
         epoch_losses = np.append(epoch_losses, batch_loss)
 
-        del loss, feats_s, feats_t, miner_outputs, images, labels, batch_loss,  loss_ms, loss_kd, embeddings_s
+        del loss, feats_s, miner_outputs, images, labels, batch_loss, loss_ms, embeddings_s
+        del embeddings_t, feats_t
 
     logging.info(f"Finished epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, "
         f"average epoch loss = {epoch_losses.mean():.4f}")
@@ -133,9 +190,12 @@ writer.close()
 logging.info(f"Best R@1: {best_r1:.1f}")
 logging.info(f"Trained for {epoch_num+1:02d} epochs, in total in {str(datetime.now() - start_time)[:-7]}")
 
+# del teacher_feats
+
 # update test
 
-args.resize_test_imgs = False
+args.resize_test_imgs = True
+args.resize = [322, 322]
 args.resume = f"{args.save_dir}/best_model.pth"
 
 model = vgl_network.MambaVGL(args)

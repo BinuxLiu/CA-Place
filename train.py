@@ -37,7 +37,7 @@ logging.info(f"Val set: {val_ds}")
 if MODE == "T":
     model = vgl_network.VGLNet(args) # test the performance of teacher model
 else:
-    model = vgl_network.MambaVGL(args) # test the performance of teacher model
+    model = vgl_network.MambaVGL(args) # test the performance of student model
 model = model.to("cuda")
 
 args.resize = resize_tmp
@@ -134,7 +134,8 @@ logging.info(f"Trained for {epoch_num+1:02d} epochs, in total in {str(datetime.n
 
 # update test
 args.dataset_name = "pitts30k"
-args.resize_test_imgs = False
+args.resize_test_imgs = True
+args.resize = [224, 224]
 args.resume = f"{args.save_dir}/best_model.pth"
 
 if MODE == "T":

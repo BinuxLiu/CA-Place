@@ -11,19 +11,23 @@ class MambaVGL(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.backbone = mamba_vision.mamba_vision_T(
-            pretrained=True, 
+            pretrained=False, 
             model_path = "/root/autodl-tmp/MambaVision/weights/mambavision_tiny_1k.pth.tar")
         
-        self.aggregation = get_aggregation(args, channels=640)
+        self.aggregation = get_aggregation(args, channels=640, fc_output_dim = 640)
         
     def forward(self, x):
+        fs = []
         x = self.backbone.patch_embed(x)
+        
         for lev in self.backbone.levels:
             x = lev(x)
-        feats_s = x
+            fs.append(x)
+            
         x = self.backbone.norm(x)
         x = self.aggregation(x)
-        return x, feats_s
+        
+        return x, fs
     
 class VGLNet(nn.Module):
 
@@ -33,22 +37,34 @@ class VGLNet(nn.Module):
             backbone=args.backbone_t,
             trainable_layers=args.trainable_layers,
             return_token=args.use_cls)
-        
-        self.aggregation = get_aggregation(args, channels = dinov2_network.CHANNELS_NUM[args.backbone_t])
-        
+        self.channels_num = dinov2_network.CHANNELS_NUM[args.backbone_t]
+        self.aggregation = get_aggregation(args, channels = self.channels_num, fc_output_dim = 768)
+     
     def forward(self, x):
+        
+        B, C, H, W = x.shape
+        fs = []
+        x = self.backbone.model.prepare_tokens_with_masks(x)
 
-        x = self.backbone(x)
-        feats_t = x
-        x = self.aggregation(x)
-        return x, feats_t
+        for blk in self.backbone.model.blocks:
+            x = blk(x)
+            f = x[:, 1:]
+            f = f.reshape((B, H // 14, W // 14, self.channels_num)).permute(0, 3, 1, 2)
+            fs.append(f)
+
+        x = self.backbone.model.norm(x)
+        f = x[:, 1:]
+        f = f.reshape((B, H // 14, W // 14, self.channels_num)).permute(0, 3, 1, 2)
+        x = self.aggregation(f)
+        
+        return x, fs
     
 class VGLNet_Test(nn.Module):
 
     def __init__(self, args):
         super().__init__()
         self.backbone = dinov2_network.DINOv2(backbone=args.backbone_t,
-                               trainable_layers=args.trainable_layers)
+                               return_token=args.use_cls)
         
         self.aggregation = get_aggregation(args, channels = dinov2_network.CHANNELS_NUM[args.backbone_t])
         
@@ -69,7 +85,7 @@ class VGLNet_Test(nn.Module):
         return x, feats_t
     
 
-def get_aggregation(args, channels = None):
+def get_aggregation(args, channels = None , fc_output_dim = None):
     if args.aggregation == "salad":
         return aggregations.SALAD(num_channels = channels)
     elif args.aggregation == "cosgem":
@@ -80,7 +96,7 @@ def get_aggregation(args, channels = None):
         return aggregations.G2M(
             # num_channels=640,
             num_channels=channels,
-            fc_output_dim=args.features_dim,
+            fc_output_dim=fc_output_dim,
             num_hiddens=args.num_hiddens,
             use_cls=args.use_cls,
             use_ca=args.use_ca,
