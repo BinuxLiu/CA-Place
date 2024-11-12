@@ -11,10 +11,10 @@ class MambaVGL(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.backbone = mamba_vision.mamba_vision_T(
-            pretrained=False, 
+            pretrained=True, 
             model_path = "/root/autodl-tmp/MambaVision/weights/mambavision_tiny_1k.pth.tar")
         
-        self.aggregation = get_aggregation(args, channels=640, fc_output_dim = 640)
+        self.aggregation = get_aggregation(args, channels=640, fc_output_dim = 768)
         
     def forward(self, x):
         fs = []

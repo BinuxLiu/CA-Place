@@ -17,7 +17,7 @@ IMAGENET_MEAN_STD = {'mean': [0.485, 0.456, 0.406],
 #                 'PRG', 'WashingtonDC', 'Brussels', 'London',
 #                 'Melbourne', 'Osaka', 'PRS',]
 
-TRAIN_CITIES = ['Bangkok', 'BuenosAires'] # just for testing
+TRAIN_CITIES = ['Bangkok',] # just for testing
 
 class GSVCitiesDataset(Dataset):
     def __init__(self, args, cities=['London', 'Boston'], img_per_place=4, min_img_per_place=4):

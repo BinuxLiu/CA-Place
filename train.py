@@ -64,14 +64,14 @@ if args.resume:
 else:
     best_r1 = start_epoch_num = not_improved_num = 0
 
+train_ds = gsv_cities.GSVCitiesDataset(args, cities=(gsv_cities.TRAIN_CITIES))
+train_dl = DataLoader(train_ds, batch_size= args.train_batch_size, num_workers=args.num_workers, pin_memory= True)
+
 #### Training loop
 for epoch_num in range(start_epoch_num, args.epochs_num):
     logging.info(f"Start training epoch: {epoch_num:02d}")
 
-    random_datasets = gsv_cities.TRAIN_CITIES.copy()
-    random.shuffle(random_datasets)
-    train_ds = gsv_cities.GSVCitiesDataset(args, cities=(random_datasets))
-    train_dl = DataLoader(train_ds, batch_size= args.train_batch_size, num_workers=args.num_workers, pin_memory= True)
+
     epoch_start_time = datetime.now()
     epoch_losses=[]
 
